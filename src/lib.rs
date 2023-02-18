@@ -6,10 +6,12 @@ use syn::{parse_macro_input, Result};
 
 mod common;
 
+mod tagged;
+mod variant_wrapper;
+
 mod extract_variant;
 mod variant_implement;
 mod variant_of;
-mod variant_wrapper;
 
 #[inline]
 fn result_of(doit: Result<impl Into<TokenStream>>) -> TokenStream {
@@ -40,4 +42,10 @@ pub fn variant_wrapper(args: TokenStream, input: TokenStream) -> TokenStream {
         parse_macro_input!(args),
         parse_macro_input!(input),
     ))
+}
+
+#[cfg(feature = "tag")]
+#[proc_macro_derive(Tagged, attributes(tagged))]
+pub fn tagged(input: TokenStream) -> TokenStream {
+    result_of(tagged::doit(parse_macro_input!(input)))
 }

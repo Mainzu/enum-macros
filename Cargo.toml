@@ -1,3 +1,5 @@
+[workspace]
+
 [package]
 name = "enum-macros"
 version = "0.1.0"
@@ -11,4 +13,9 @@ proc-macro = true
 [dependencies]
 proc-macro2 = "1.0"
 quote = "1.0"
-syn = { version = "1", features = ["full"] }
+syn = { version = "1", features = ["full", "extra-traits"] }
+
+enum-tag = { path = "enum-tag", optional = true }
+
+[features]
+tag = ["dep:enum-tag"]

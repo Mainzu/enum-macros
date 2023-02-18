@@ -9,11 +9,11 @@ use syn::{
     parenthesized,
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
-    token, Attribute, Error, Fields, FieldsNamed, FieldsUnnamed, Ident, Lit, Path, Token, Type,
-    TypePath, Variant,
+    token, Attribute, Error, Fields, FieldsNamed, FieldsUnnamed, Ident, Lit, LitBool, Meta, Path,
+    Result, Token, Type, TypePath, Variant,
 };
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct AttributeArgValue {
     pub eq_token: Token![=],
     pub lit: Lit,
@@ -24,7 +24,7 @@ impl ToTokens for AttributeArgValue {
         self.lit.to_tokens(tokens);
     }
 }
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct AttributeArg {
     pub ident: Ident,
     pub value: Option<AttributeArgValue>,
@@ -36,6 +36,13 @@ impl ToTokens for AttributeArg {
     }
 }
 pub type AttributeArgs = Punctuated<AttributeArg, Token![,]>;
+
+pub type Args = Punctuated<Meta, Token![,]>;
+pub fn ident(arg: &Meta) -> Result<&Ident> {
+    let path = arg.path();
+    path.get_ident()
+        .ok_or_else(|| Error::new_spanned(path, "must be a bare identifier"))
+}
 
 pub struct APIAttributeArgs {
     pub raw: AttributeArgs,
@@ -89,7 +96,7 @@ impl Display for APIAttributeArgsConstructionError {
 }
 impl TryFrom<AttributeArgs> for APIAttributeArgs {
     type Error = APIAttributeArgsConstructionError;
-    fn try_from(raw: AttributeArgs) -> Result<Self, Self::Error> {
+    fn try_from(raw: AttributeArgs) -> std::result::Result<Self, Self::Error> {
         let mut api = HashMap::new();
         for arg in &raw {
             let key = arg.ident.to_string();
@@ -176,22 +183,24 @@ impl ToTokens for WrappedVariant {
     }
 }
 
-pub enum WrappedVariantsError {
-    NamedFields(FieldsNamed),
-    UnnamedFields(FieldsUnnamed),
-}
 impl TryFrom<&Variant> for WrappedVariant {
-    type Error = WrappedVariantsError;
-    fn try_from(variant: &Variant) -> Result<Self, Self::Error> {
+    type Error = Error;
+    fn try_from(variant: &Variant) -> std::result::Result<Self, Self::Error> {
         let id = variant.ident.clone();
         let ty = match &variant.fields {
-            Fields::Named(named_fields) => {
-                return Err(WrappedVariantsError::NamedFields(named_fields.clone()))
-            }
-            Fields::Unnamed(unnamed_fields) => {
-                let FieldsUnnamed { unnamed, .. } = unnamed_fields;
+            Fields::Named(named_fields) => Err(Error::new(
+                named_fields.brace_token.span,
+                "named fields unsupported",
+            ))?,
+            Fields::Unnamed(FieldsUnnamed {
+                unnamed,
+                paren_token,
+            }) => {
                 if unnamed.len() != 1 {
-                    return Err(WrappedVariantsError::UnnamedFields(unnamed_fields.clone()));
+                    Err(Error::new(
+                        paren_token.span,
+                        "tuple-like variant must have exactly 1 field",
+                    ))?
                 }
                 unnamed.first().unwrap().ty.clone()
             }
@@ -220,6 +229,20 @@ pub fn generate_conversion_impl(ident: &Ident, id: &Ident, ty: &Type) -> TokenSt
                 } else {
                     ::core::result::Result::Err(value)
                 }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "tag")]
+pub use tag::*;
+#[cfg(feature = "tag")]
+mod tag {
+    use super::*;
+    pub fn generate_variant_of_impl(ident: &Ident, id: &Ident, ty: &Type) -> TokenStream {
+        quote! {
+            impl ::enum_tag::VariantOf<#ident> for #ty {
+                const TAG: #ident::Tag = #ident::Tag::#id;
             }
         }
     }

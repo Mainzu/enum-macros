@@ -12,7 +12,7 @@ struct A;
 struct B();
 struct C {}
 
-#[variant_wrapper(x = 1, x = 1)]
+#[variant_wrapper(no_impl = false)]
 enum MyEnum {
     A,
     B,
