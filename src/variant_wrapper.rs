@@ -3,9 +3,8 @@ use quote::{quote, ToTokens};
 use syn::{
     parse::{Parse, ParseStream, Parser},
     punctuated::Punctuated,
-    visit::Visit,
-    Attribute, Error, Fields, FieldsUnnamed, ItemEnum, Lit, LitBool, Meta, MetaList, NestedMeta,
-    Path, Result, Token, Type, TypePath, Variant,
+    Attribute, Error, Fields, FieldsUnnamed, ItemEnum, Lit, LitBool, Meta, MetaList, Path, Result,
+    Token, Type, TypePath, Variant,
 };
 
 use crate::common::{
@@ -60,7 +59,7 @@ fn wrap_variant(variant: &Variant) -> Result<WrappedVariant> {
     let id = variant.ident.clone();
     let ty = match &variant.fields {
         Fields::Named(named_fields) => Err(Error::new(
-            named_fields.brace_token.span,
+            named_fields.brace_token.span.join(),
             "named fields unsupported",
         ))?,
         Fields::Unnamed(FieldsUnnamed {
@@ -69,7 +68,7 @@ fn wrap_variant(variant: &Variant) -> Result<WrappedVariant> {
         }) => {
             if unnamed.len() != 1 {
                 Err(Error::new(
-                    paren_token.span,
+                    paren_token.span.join(),
                     "tuple-like variant must have exactly 1 field",
                 ))?
             }

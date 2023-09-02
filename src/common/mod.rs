@@ -11,8 +11,8 @@ use syn::{
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
     spanned::Spanned,
-    token, Attribute, Error, Fields, FieldsNamed, FieldsUnnamed, Ident, Lit, LitBool, LitInt,
-    LitStr, Meta, Path, Result, Token, Type, TypePath, Variant,
+    token, Attribute, Error, Expr, ExprLit, Fields, FieldsNamed, FieldsUnnamed, Ident, Lit,
+    LitBool, LitInt, LitStr, Meta, MetaNameValue, Path, Result, Token, Type, TypePath, Variant,
 };
 
 #[derive(Debug, Clone)]
@@ -52,12 +52,15 @@ pub fn no_impl_value(arg: Meta) -> Result<Option<bool>> {
     Ok(Some(match arg {
         Meta::Path(..) => true,
         Meta::List(list) => Err(Error::new(
-            list.paren_token.span,
+            list.delimiter.span().join(),
             "`no_impl` does not accept list",
         ))?,
-        Meta::NameValue(value) => match value.lit {
-            Lit::Bool(LitBool { value, .. }) => value,
-            lit => Err(Error::new_spanned(lit, "expected bool"))?,
+        Meta::NameValue(MetaNameValue { value, .. }) => match value {
+            Expr::Lit(ExprLit {
+                lit: Lit::Bool(LitBool { value, .. }),
+                ..
+            }) => value,
+            _ => Err(Error::new_spanned(value, "expected bool"))?,
         },
     }))
 }

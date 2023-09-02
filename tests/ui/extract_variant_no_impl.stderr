@@ -17,12 +17,10 @@ help: try wrapping the expression in `MyEnum::A`
     |                  ++++++++++ +
 
 error[E0277]: the trait bound `A: From<MyEnum>` is not satisfied
-  --> tests/ui/extract_variant_no_impl.rs:17:25
+  --> tests/ui/extract_variant_no_impl.rs:17:13
    |
 17 |     let a = A::try_from(MyEnum::A(A));
-   |             ----------- ^^^^^^^^^^^^ the trait `From<MyEnum>` is not implemented for `A`
-   |             |
-   |             required by a bound introduced by this call
+   |             ^ the trait `From<MyEnum>` is not implemented for `A`
    |
    = note: required for `MyEnum` to implement `Into<A>`
    = note: required for `A` to implement `TryFrom<MyEnum>`

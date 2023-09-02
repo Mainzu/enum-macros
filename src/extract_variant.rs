@@ -3,11 +3,11 @@ use std::fmt::{Debug, Write};
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote, ToTokens};
 use syn::{
-    parse::Parser,
+    parse::{Parse, Parser},
     punctuated::{Pair, Punctuated},
-    token::{self, Colon2, Comma},
-    AngleBracketedGenericArguments, Attribute, Error, FieldsNamed, GenericArgument, Generics,
-    ItemEnum, ItemStruct, Lifetime, Lit, Meta, MetaList, MetaNameValue, NestedMeta,
+    token::{self, Comma},
+    AngleBracketedGenericArguments, Attribute, Error, Expr, ExprLit, FieldsNamed, GenericArgument,
+    Generics, ItemEnum, ItemStruct, Lifetime, Lit, LitStr, Meta, MetaList, MetaNameValue,
     ParenthesizedGenericArguments, Path, PathArguments, PathSegment, Result, ReturnType, Type,
     TypePath, Variant,
 };
@@ -166,104 +166,96 @@ struct Params {
     variant_style: Option<Style>,
     // generic: TODO
 }
+
 impl TryFrom<Args> for Params {
     type Error = Error;
     fn try_from(args: Args) -> std::result::Result<Self, Self::Error> {
         let mut params = Params::default();
-
         for arg in args {
             let ident = ident(&arg)?;
             match ident.to_string().as_str() {
                 "prefix" => {
+                    macro_rules! error {
+                        ($tokens:expr) => {
+                            Error::new_spanned(
+                                $tokens,
+                                r#"valid forms are `prefix(Ident)` or `prefix = "Ident"`"#,
+                            )
+                        };
+                    }
                     params.prefix = Some(match arg {
-                        Meta::Path(path) => Err(Error::new_spanned(path, "`prefix` unset"))?,
-                        Meta::List(MetaList {
-                            path,
-                            paren_token,
-                            ref nested,
-                        }) => {
-                            if nested.len() != 1 {
-                                Err(Error::new_spanned(nested, "must have exactly 1 field"))?
-                            }
-                            match nested.first().unwrap() {
-                                NestedMeta::Meta(Meta::Path(path)) => path_id(path)?.to_string(),
-                                NestedMeta::Lit(Lit::Str(str)) => str.value(),
-                                _ => Err(Error::new_spanned(
-                                    nested,
-                                    r#"valid forms are `prefix(Ident)` or `prefix = "Ident"`"#,
-                                ))?,
-                            }
+                        Meta::Path(path) => Err(error!(path))?,
+                        Meta::List(MetaList { tokens, .. }) => {
+                            let id: Ident = syn::parse2(tokens.clone()).map_err(|mut err| {
+                                err.combine(error!(tokens));
+                                err
+                            })?;
+                            id.to_string()
                         }
                         Meta::NameValue(MetaNameValue {
-                            path,
-                            eq_token,
-                            lit: Lit::Str(str),
-                        }) => str.value(),
-                        _ => Err(Error::new_spanned(
-                            arg,
-                            r#"valid forms are `prefix(Ident)` or `prefix = "Ident"`"#,
-                        ))?,
+                            value:
+                                Expr::Lit(ExprLit {
+                                    lit: Lit::Str(s), ..
+                                }),
+                            ..
+                        }) => s.value(),
+                        _ => Err(error!(arg))?,
                     })
                 }
                 "suffix" => {
+                    macro_rules! error {
+                        ($tokens:expr) => {
+                            Error::new_spanned(
+                                $tokens,
+                                r#"valid forms are `suffix(Ident)` or `suffix = "Ident"`"#,
+                            )
+                        };
+                    }
                     params.suffix = Some(match arg {
-                        Meta::Path(path) => Err(Error::new_spanned(path, "`suffix` unset"))?,
-                        Meta::List(MetaList {
-                            path,
-                            paren_token,
-                            ref nested,
-                        }) => {
-                            if nested.len() != 1 {
-                                Err(Error::new_spanned(nested, "must have exactly 1 field"))?
-                            }
-                            match nested.first().unwrap() {
-                                NestedMeta::Meta(Meta::Path(path)) => path_id(path)?.to_string(),
-                                NestedMeta::Lit(Lit::Str(str)) => str.value(),
-                                _ => Err(Error::new_spanned(
-                                    nested,
-                                    r#"valid forms are `suffix(Ident)` or `suffix = "Ident"`"#,
-                                ))?,
-                            }
+                        Meta::Path(path) => Err(error!(path))?,
+                        Meta::List(MetaList { tokens, .. }) => {
+                            let id: Ident = syn::parse2(tokens.clone()).map_err(|mut err| {
+                                err.combine(error!(tokens));
+                                err
+                            })?;
+                            id.to_string()
                         }
                         Meta::NameValue(MetaNameValue {
-                            path,
-                            eq_token,
-                            lit: Lit::Str(str),
-                        }) => str.value(),
-                        _ => Err(Error::new_spanned(
-                            arg,
-                            r#"valid forms are `suffix(Ident)` or `suffix = "Ident"`"#,
-                        ))?,
+                            value:
+                                Expr::Lit(ExprLit {
+                                    lit: Lit::Str(s), ..
+                                }),
+                            ..
+                        }) => s.value(),
+                        _ => Err(error!(arg))?,
                     })
                 }
                 "no_impl" => params.no_impl = no_impl_value(arg)?,
                 "style" => {
-                    params.variant_style = if let Meta::NameValue(MetaNameValue {
-                        path,
-                        eq_token,
-                        lit,
-                    }) = arg
+                    macro_rules! error {
+                        ($tokens:expr) => {
+                            Error::new_spanned(
+                                $tokens,
+                                r#"valid forms are `style = "wrap"`, or `style = "keep"`"#,
+                            )
+                        };
+                    }
+                    params.variant_style = if let Meta::NameValue(MetaNameValue { value, .. }) = arg
                     {
-                        if let Lit::Str(str) = lit {
+                        if let Expr::Lit(ExprLit {
+                            lit: Lit::Str(str), ..
+                        }) = value
+                        {
                             match str.value().as_str() {
                                 "wrap" => Some(Style::Wrap),
                                 "keep" => Some(Style::Keep),
-                                _ => Err(Error::new_spanned(
-                                    str,
-                                    r#"valid forms are `style = "wrap"`, or `style = "keep"`"#,
-                                ))?,
+                                _ => Err(error!(str))?,
                             }
                         } else {
-                            Err(Error::new_spanned(
-                                lit,
-                                r#"valid forms are `style = "wrap"`, or `style = "keep"`"#,
-                            ))?
+                            Err(error!(value))?
                         }
                     } else {
-                        Err(Error::new_spanned(
-                            arg,
-                            r#"valid forms are `style = "wrap"`, or `style = "keep"`"#,
-                        ))?
+                        Err(error!(arg))?
                     }
                 }
                 _ => Err(Error::new_spanned(
