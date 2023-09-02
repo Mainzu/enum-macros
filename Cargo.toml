@@ -19,6 +19,3 @@ enum-tag = { path = "enum-tag", optional = true }
 
 [dev-dependencies]
 trybuild = "1.0"
-
-[features]
-tag = ["dep:enum-tag"]

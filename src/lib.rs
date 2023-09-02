@@ -6,7 +6,6 @@ use syn::{parse_macro_input, Result};
 
 mod common;
 
-mod tagged;
 mod variant_wrapper;
 
 mod extract_variant;
@@ -54,7 +53,7 @@ pub fn extract_variant(args: TokenStream, input: TokenStream) -> TokenStream {
 
 /// Annotate the enum as a wrapper for its variants. Useful for when you already have its
 /// variant type(s) defined as struct(s).
-/// 
+///
 /// The primary purpose of this macro is to create [`From`] and [`TryFrom`] implementations.
 #[proc_macro_attribute]
 pub fn variant_wrapper(args: TokenStream, input: TokenStream) -> TokenStream {
@@ -62,11 +61,4 @@ pub fn variant_wrapper(args: TokenStream, input: TokenStream) -> TokenStream {
         parse_macro_input!(args),
         parse_macro_input!(input),
     ))
-}
-
-/// 
-#[cfg(feature = "tag")]
-#[proc_macro_derive(Tagged, attributes(tagged))]
-pub fn tagged(input: TokenStream) -> TokenStream {
-    result_of(tagged::doit(parse_macro_input!(input)))
 }
