@@ -13,9 +13,12 @@ proc-macro = true
 [dependencies]
 proc-macro2 = "1.0"
 quote = "1.0"
-syn = { version = "1", features = ["full", "extra-traits"] }
+syn = { version = "1", features = ["full", "extra-traits", "visit"] }
 
 enum-tag = { path = "enum-tag", optional = true }
+
+[dev-dependencies]
+trybuild = "1.0"
 
 [features]
 tag = ["dep:enum-tag"]

@@ -1,0 +1,37 @@
+error[E0308]: mismatched types
+  --> tests/ui/extract_variant_no_impl.rs:15:18
+   |
+15 |     MyEnum::from(A);
+   |     ------------ ^ expected `MyEnum`, found `A`
+   |     |
+   |     arguments to this function are incorrect
+   |
+note: associated function defined here
+  --> $RUST/core/src/convert/mod.rs
+   |
+   |     fn from(value: T) -> Self;
+   |        ^^^^
+help: try wrapping the expression in `MyEnum::A`
+    |
+15  |     MyEnum::from(MyEnum::A(A));
+    |                  ++++++++++ +
+
+error[E0277]: the trait bound `A: From<MyEnum>` is not satisfied
+  --> tests/ui/extract_variant_no_impl.rs:17:25
+   |
+17 |     let a = A::try_from(MyEnum::A(A));
+   |             ----------- ^^^^^^^^^^^^ the trait `From<MyEnum>` is not implemented for `A`
+   |             |
+   |             required by a bound introduced by this call
+   |
+   = note: required for `MyEnum` to implement `Into<A>`
+   = note: required for `A` to implement `TryFrom<MyEnum>`
+
+error[E0277]: the trait bound `A: From<MyEnum>` is not satisfied
+  --> tests/ui/extract_variant_no_impl.rs:17:13
+   |
+17 |     let a = A::try_from(MyEnum::A(A));
+   |             ^^^^^^^^^^^ the trait `From<MyEnum>` is not implemented for `A`
+   |
+   = note: required for `MyEnum` to implement `Into<A>`
+   = note: required for `A` to implement `TryFrom<MyEnum>`

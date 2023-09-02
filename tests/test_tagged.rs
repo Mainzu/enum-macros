@@ -10,7 +10,8 @@ enum Tag {
 
 #[derive(Tagged)]
 // #[tagged(tag(generate(X)))]
-#[tagged(tag(generate()))]
+// #[tagged(tag(generate()))]
+#[tagged(tag(Tag))]
 enum MyEnum {
     A,
     B(),
@@ -18,6 +19,6 @@ enum MyEnum {
 }
 
 fn f() {
-
-    // let a = X::A;
+    // MyEnumTag::A;
+    let a = X::A;
 }

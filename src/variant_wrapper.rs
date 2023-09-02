@@ -1,22 +1,30 @@
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{quote, ToTokens};
 use syn::{
-    parse::{Parse, Parser},
+    parse::{Parse, ParseStream, Parser},
     punctuated::Punctuated,
-    Attribute, Error, ItemEnum, Lit, LitBool, Meta, MetaList, NestedMeta, Result, Token,
+    visit::Visit,
+    Attribute, Error, Fields, FieldsUnnamed, ItemEnum, Lit, LitBool, Meta, MetaList, NestedMeta,
+    Path, Result, Token, Type, TypePath, Variant,
 };
 
 use crate::common::{
-    generate_conversion_impl, ident, optional_attribute_args_list, APIAttributeArgs, Args,
-    AttributeArgs, WrappedVariant,
+    generate_conversion_impl, ident, kw, no_impl_value, optional_attribute_args_list,
+    APIAttributeArgs, AttributeArgs, Eq, NoImpl, WrappedVariant,
 };
 
+type Params = Punctuated<Param, Token![,]>;
+#[inline]
+fn parse_params(args: TokenStream) -> Result<Params> {
+    Params::parse_terminated.parse2(args)
+}
+
 pub fn doit(args: TokenStream, item_enum: ItemEnum) -> Result<TokenStream> {
-    let args = Args::parse_terminated.parse2(args)?;
-    let params = Params::try_from(args)?; // TODO - this naming scheme is really stupid, should probabably change it some day
+    let params = parse_params(args)?;
+    let options = Options::try_from(params)?; // TODO - this naming scheme is really stupid, should probabably change it some day
     let Config {
         implement_conversion,
-    } = Config::new(params);
+    } = Config::new(options);
 
     let ItemEnum {
         attrs,
@@ -28,20 +36,16 @@ pub fn doit(args: TokenStream, item_enum: ItemEnum) -> Result<TokenStream> {
         variants,
     } = &item_enum;
 
-    let wrapped_variants: Vec<WrappedVariant> = item_enum
-        .variants
-        .iter()
-        .map(TryFrom::try_from)
-        .try_collect()?;
+    let wrapped_variants: Vec<WrappedVariant> =
+        item_enum.variants.iter().map(wrap_variant).try_collect()?;
 
-    let variants = if implement_conversion {
-        &wrapped_variants[..]
-    } else {
-        &[]
-    };
-    let conversion_impls = variants
-        .iter()
-        .map(|WrappedVariant { id, ty }| generate_conversion_impl(ident, id, ty));
+    let conversion_impls = wrapped_variants.iter().map(|WrappedVariant { id, ty }| {
+        if implement_conversion {
+            generate_conversion_impl(ident, id, ty)
+        } else {
+            quote!()
+        }
+    });
 
     Ok(quote! {
         #(#attrs)*
@@ -52,51 +56,134 @@ pub fn doit(args: TokenStream, item_enum: ItemEnum) -> Result<TokenStream> {
     })
 }
 
+fn wrap_variant(variant: &Variant) -> Result<WrappedVariant> {
+    let id = variant.ident.clone();
+    let ty = match &variant.fields {
+        Fields::Named(named_fields) => Err(Error::new(
+            named_fields.brace_token.span,
+            "named fields unsupported",
+        ))?,
+        Fields::Unnamed(FieldsUnnamed {
+            unnamed,
+            paren_token,
+        }) => {
+            if unnamed.len() != 1 {
+                Err(Error::new(
+                    paren_token.span,
+                    "tuple-like variant must have exactly 1 field",
+                ))?
+            }
+            unnamed.first().unwrap().ty.clone()
+        }
+        Fields::Unit => Type::Path(TypePath {
+            qself: None,
+            path: Path::from(id.clone()),
+        }),
+    };
+    Ok(WrappedVariant { id, ty })
+}
+
+enum Param {
+    NoImpl(NoImpl),
+}
+impl Parse for Param {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let lookahead = input.lookahead1();
+        if lookahead.peek(kw::no_impl) {
+            Ok(Param::NoImpl(input.parse()?))
+        } else {
+            Err(lookahead.error())
+        }
+    }
+}
+fn fill_empty_or_else<T>(
+    opt: &mut Option<T>,
+    new: T,
+    err: impl FnOnce(&T, T) -> Error,
+) -> Result<()> {
+    match opt {
+        Some(old) => Err(err(&old, new)),
+        None => Ok({
+            opt.replace(new);
+        }),
+    }
+}
+
+// #[derive(FromMeta)]
 struct Config {
     implement_conversion: bool,
 }
 impl Config {
-    fn new(Params { no_impl }: Params) -> Self {
+    fn new(Options { no_impl }: Options) -> Self {
         Self {
-            implement_conversion: !no_impl.unwrap_or(false),
+            implement_conversion: !no_impl.map_or(false, |a| a.truthy()),
         }
     }
 }
 
 #[derive(Default)]
-struct Params {
-    no_impl: Option<bool>,
+struct Options {
+    no_impl: Option<NoImpl>,
 }
-
-impl TryFrom<Args> for Params {
+impl TryFrom<Params> for Options {
     type Error = Error;
-
-    fn try_from(args: Args) -> std::result::Result<Self, Self::Error> {
-        let mut params = Params::default();
-
-        for arg in args {
-            let ident = ident(&arg)?;
-
-            match ident.to_string().as_str() {
-                "no_impl" => {
-                    params.no_impl = Some(match arg {
-                        Meta::Path(..) => true,
-                        Meta::List(list) => Err(Error::new(
-                            list.paren_token.span,
-                            "`no_impl` does not accept list",
-                        ))?,
-                        Meta::NameValue(value) => match value.lit {
-                            Lit::Bool(LitBool { value, .. }) => value,
-                            lit => Err(Error::new_spanned(lit, "expected bool"))?,
-                        },
-                    })
+    fn try_from(params: Params) -> std::result::Result<Self, Self::Error> {
+        let mut options = Options::default();
+        for arg in params {
+            match arg {
+                Param::NoImpl(no_impl) => {
+                    fill_empty_or_else(&mut options.no_impl, no_impl, |old, new| {
+                        Error::new_spanned(new, "duplicate parameter")
+                    })?
                 }
-                _ => Err(Error::new_spanned(
-                    ident,
-                    "variant_wrapper: unrecognized parameter",
-                ))?,
             }
         }
-        Ok(params)
+        Ok(options)
+    }
+}
+
+fn pipeline(input: TokenStream) -> Result<Options> {
+    let params = parse_params(input)?;
+    Ok(Options::try_from(params)?)
+}
+#[test]
+fn test() {
+    for input in [
+        quote!(),
+        quote!(no_impl),
+        quote!(no_impl = true),
+        quote!(no_impl = false),
+    ] {
+        let _ = pipeline(input).unwrap();
+    }
+}
+// impl TryFrom<Args> for Options {
+//     type Error = Error;
+
+//     fn try_from(args: Args) -> std::result::Result<Self, Self::Error> {
+//         let mut params = Options::default();
+
+//         for arg in args {
+//             params
+//             // let ident = ident(&arg)?;
+
+//             // match ident.to_string().as_str() {
+//             //     "no_impl" => params.no_impl = no_impl_value(arg)?,
+//             //     _ => Err(Error::new_spanned(
+//             //         ident,
+//             //         "variant_wrapper: unrecognized parameter",
+//             //     ))?,
+//             // }
+//         }
+//         Ok(params)
+//     }
+// }
+mod m {
+    use std::borrow::Cow;
+    trait Trait: Clone {
+        fn f() {}
+    }
+    fn f(cow: impl AsRef<i32>) {
+        ()
     }
 }

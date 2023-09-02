@@ -6,7 +6,7 @@ use syn::{
     Error, ItemEnum, Lit, Meta, MetaList, MetaNameValue, NestedMeta, Path, Result,
 };
 
-use crate::common::{ident, Args, AttributeArgs};
+use crate::common::{ident, path_id, Args, AttributeArgs};
 
 pub fn doit(item_enum: ItemEnum) -> Result<TokenStream> {
     let ItemEnum {
@@ -56,68 +56,62 @@ impl TryFrom<Args> for Params {
     type Error = Error;
     fn try_from(args: Args) -> std::result::Result<Self, Self::Error> {
         let mut params = Params::default();
-        const TAG_VALID_FORMS: &str =
-            "valid forms are `tag(PathTo::ExistingEnum)`, `tag(generate())`, or `tag(generate(NameOfEnumToBeGenerated))`";
 
         for arg in args {
             let ident = ident(&arg)?;
 
             match ident.to_string().as_str() {
-                "tag" => {
-                    params.tag = if let Meta::List(MetaList {
-                        path,
-                        paren_token,
-                        nested,
-                    }) = arg
-                    {
-                        if nested.len() != 1 {
-                            Err(Error::new(paren_token.span, TAG_VALID_FORMS))?
-                        }
-                        let item = nested.into_iter().next().unwrap();
-                        match item {
-                            NestedMeta::Meta(Meta::Path(path)) => Some(Tag::Existing(path)),
-                            NestedMeta::Meta(Meta::List(MetaList {
-                                path,
-                                paren_token,
-                                nested,
-                            })) => {
-                                if !path.is_ident("generate") {
-                                    Err(Error::new_spanned(path, TAG_VALID_FORMS))?
-                                }
-                                match nested.len() {
-                                    0 => None,
-                                    1 => {
-                                        let item = nested.into_iter().next().unwrap();
-                                        if let NestedMeta::Meta(Meta::Path(path)) = item {
-                                            if let Some(ident) = path.get_ident().cloned() {
-                                                Some(Tag::Generate(ident))
-                                            } else {
-                                                Err(Error::new_spanned(
-                                                    path,
-                                                    "must be a bare identifier",
-                                                ))?
-                                            }
-                                        } else {
-                                            None
-                                        }
-                                    }
-                                    _ => Err(Error::new_spanned(
-                                        nested,
-                                        "must be a bare identifier",
-                                    ))?,
-                                }
-                            }
-                            a => Err(Error::new_spanned(a, TAG_VALID_FORMS))?,
-                        }
-                    } else {
-                        Err(Error::new_spanned(arg, TAG_VALID_FORMS))?
-                    }
-                }
+                "tag" => params.tag = tag_value(arg)?,
                 _ => Err(Error::new_spanned(ident, "Tagged: unrecognized parameter"))?,
             }
         }
         Ok(params)
     }
+}
+
+fn tag_value(arg: Meta) -> Result<Option<Tag>> {
+    const TAG_VALID_FORMS: &str =
+            "valid forms are `tag(PathTo::ExistingEnum)`, `tag(generate())`, or `tag(generate(NameOfEnumToBeGenerated))`";
+    Ok(
+        if let Meta::List(MetaList {
+            path,
+            paren_token,
+            nested,
+        }) = arg
+        {
+            if nested.len() != 1 {
+                Err(Error::new(paren_token.span, TAG_VALID_FORMS))?
+            }
+            let item = nested.into_iter().next().unwrap();
+            match item {
+                NestedMeta::Meta(Meta::Path(path)) => Some(Tag::Existing(path)),
+                NestedMeta::Meta(Meta::List(MetaList {
+                    path,
+                    paren_token,
+                    nested,
+                })) => {
+                    if !path.is_ident("generate") {
+                        Err(Error::new_spanned(path, TAG_VALID_FORMS))?
+                    }
+                    match nested.len() {
+                        0 => None,
+                        1 => {
+                            let item = nested.into_iter().next().unwrap();
+                            if let NestedMeta::Meta(Meta::Path(path)) = item {
+                                Some(Tag::Generate(path_id(&path)?.clone()))
+                            } else {
+                                None
+                            }
+                        }
+                        _ => Err(Error::new_spanned(nested, "must be a bare identifier"))?,
+                    }
+                }
+                a => Err(Error::new_spanned(a, TAG_VALID_FORMS))?,
+            }
+        } else {
+            Err(Error::new_spanned(arg, TAG_VALID_FORMS))?
+        },
+    )
 }
 
 enum Tag {

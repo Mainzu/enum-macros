@@ -1,4 +1,4 @@
-use enum_macros::{variant_wrapper, ExtractVariant};
+use enum_macros::{extract_variant, variant_wrapper};
 
 // #[derive(ExtractVariant)]
 // #[extract_variant(prefix = "Hello", suffix = "World")]

@@ -1,0 +1,5 @@
+error: duplicate parameter
+ --> tests/ui/duplicate.rs:3:28
+  |
+3 | #[variant_wrapper(no_impl, no_impl)]
+  |                            ^^^^^^^
