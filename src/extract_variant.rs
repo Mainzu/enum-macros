@@ -8,9 +8,11 @@ use syn::{
     token::{self, Comma},
     AngleBracketedGenericArguments, Attribute, Error, Expr, ExprLit, FieldsNamed, GenericArgument,
     Generics, ItemEnum, ItemStruct, Lifetime, Lit, LitStr, Meta, MetaList, MetaNameValue,
-    ParenthesizedGenericArguments, Path, PathArguments, PathSegment, Result, ReturnType, Type,
-    TypePath, Variant,
+    ParenthesizedGenericArguments, Path, PathArguments, PathSegment, Result, ReturnType, Token,
+    Type, TypePath, Variant,
 };
+
+use tap::prelude::*;
 
 use crate::common::{
     generate_conversion_impl, ident, no_impl_value, path_id, Args, WrappedVariant,
@@ -23,6 +25,7 @@ pub fn doit(args: TokenStream, item_enum: ItemEnum) -> Result<TokenStream> {
         map_ident,
         implement_conversions,
         style,
+        derive_exclude,
     } = Config::new(params, &item_enum);
 
     let ItemEnum {
@@ -35,13 +38,36 @@ pub fn doit(args: TokenStream, item_enum: ItemEnum) -> Result<TokenStream> {
         variants,
     } = &item_enum;
 
+    let global_derive = attrs
+        .iter()
+        .filter(|attr| attr.path().is_ident("derive"))
+        .map(|attr| -> Result<Attribute> {
+            Ok(Attribute {
+                meta: if let Meta::List(list) = &attr.meta {
+                    let a = Punctuated::<Path, Token![,]>::parse_terminated
+                        .parse2(list.tokens.clone())?
+                        .into_iter()
+                        .filter(|path| !derive_exclude.contains(path));
+                    Meta::List(MetaList {
+                        tokens: quote! { #(#a),* },
+                        ..list.clone()
+                    })
+                } else {
+                    attr.meta.clone()
+                },
+                ..attr.clone()
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
     let wrap_variant = |variant: &Variant| {
+        let attrs = variant.attrs.clone();
         let id = variant.ident.clone();
         let ty = Type::Path(TypePath {
             qself: None,
             path: Path::from(map_ident(&id)),
         });
-        WrappedVariant { id, ty }
+        WrappedVariant { attrs, id, ty }
     };
 
     let wrapped_variants: Vec<WrappedVariant> = variants.iter().map(wrap_variant).collect();
@@ -55,10 +81,34 @@ pub fn doit(args: TokenStream, item_enum: ItemEnum) -> Result<TokenStream> {
                                attrs,
                                ident,
                                fields,
-                               discriminant,
-                           }: &Variant| {
-        ItemStruct {
-            attrs: attrs.clone(),
+                               discriminant: _,
+                           }: &Variant|
+     -> Result<ItemStruct> {
+        Ok(ItemStruct {
+            attrs: attrs
+                .iter()
+                .filter_map(|attr| {
+                    let path = attr.path();
+                    if path.is_ident("attribute") {
+                        Some(if let Meta::List(MetaList { tokens, .. }) = &attr.meta {
+                            syn::parse2::<Meta>(tokens.clone()).map(|meta| Attribute {
+                                meta,
+                                ..attr.clone()
+                            })
+                        } else {
+                            Err(Error::new_spanned(
+                                attr.meta.clone(),
+                                "must be in the form of `#[attribute(...)]`",
+                            ))
+                        })
+                    } else if path.is_ident("doc") {
+                        Some(Ok(attr.clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Result<Vec<_>>>()?
+                .tap_mut(|attrs| attrs.extend_from_slice(&global_derive)),
             vis: vis.clone(),
             struct_token: token::Struct {
                 span: Span::call_site(),
@@ -67,21 +117,50 @@ pub fn doit(args: TokenStream, item_enum: ItemEnum) -> Result<TokenStream> {
             generics: Generics::default(), // TODO
             fields: fields.clone(),
             semi_token: None,
-        }
+        })
     };
 
-    let generated_structs = variants.iter().map(generate_struct);
+    // let generated_structs = variants.iter().map(generate_struct);
+    let generated_structs = variants
+        .iter()
+        .map(generate_struct)
+        .collect::<Result<Vec<_>>>()?;
+    // .try_fold(quote! {}, |acc, s| {
+    //     s.map(
+    //         |ItemStruct {
+    //              attrs,
+    //              vis,
+    //              struct_token,
+    //              ident,
+    //              generics: _,
+    //              fields,
+    //              semi_token: _,
+    //          }| {
+    //             quote! {
+    //                 #acc
 
-    let conversion_impls = wrapped_variants.iter().map(|WrappedVariant { id, ty }| {
-        if implement_conversions {
-            match style {
-                Style::Wrap => generate_conversion_impl(ident, id, ty),
-                Style::Keep => todo!(),
+    //                 #(#attrs)*
+    //                 #(#global_derive)*
+    //                 #vis #struct_token #ident {
+    //                     #fields
+    //                 }
+    //             }
+    //         },
+    //     )
+    // })?;
+
+    let conversion_impls = wrapped_variants
+        .iter()
+        .map(|WrappedVariant { attrs: _, id, ty }| {
+            if implement_conversions {
+                match style {
+                    Style::Wrap => generate_conversion_impl(ident, id, ty),
+                    Style::Keep => todo!(),
+                }
+            } else {
+                quote!()
             }
-        } else {
-            quote!()
-        }
-    });
+        });
 
     // if let Some(lt_token) = item_enum.generics.lt_token {
     //     return Err(Error::new_spanned(
@@ -123,6 +202,7 @@ struct Config {
     map_ident: Box<dyn Fn(&Ident) -> Ident>,
     implement_conversions: bool,
     style: Style,
+    derive_exclude: Vec<Path>,
 }
 impl Config {
     fn new(
@@ -132,6 +212,7 @@ impl Config {
             no_impl,
             simplify,
             variant_style,
+            derive_exclude,
         }: Params,
         item_enum: &ItemEnum,
     ) -> Self {
@@ -141,6 +222,7 @@ impl Config {
             map_ident: Box::new(move |vid| format_ident!("{prefix}{vid}{suffix}")),
             implement_conversions: !no_impl.unwrap_or_default(),
             style: variant_style.unwrap_or_default(),
+            derive_exclude,
         }
     }
 }
@@ -164,6 +246,7 @@ struct Params {
     /// - 2: simplify all cases
     simplify: Option<u32>,
     variant_style: Option<Style>,
+    derive_exclude: Vec<Path>,
     // generic: TODO
 }
 
@@ -258,6 +341,28 @@ impl TryFrom<Args> for Params {
                         Err(error!(arg))?
                     }
                 }
+                "derive_exclude" => {
+                    macro_rules! error {
+                        ($tokens:expr) => {
+                            Error::new_spanned(
+                                $tokens,
+                                r#"valid form is `derive_exclude(Path0, Path1, ...)`"#,
+                            )
+                        };
+                    }
+
+                    if let Meta::List(MetaList {
+                        path,
+                        delimiter,
+                        tokens,
+                    }) = arg
+                    {
+                        let a = Punctuated::<Path, Token![,]>::parse_terminated.parse2(tokens)?;
+                        params.derive_exclude.extend(a.into_iter())
+                    } else {
+                        Err(error!(arg))?
+                    }
+                }
                 _ => Err(Error::new_spanned(
                     ident,
                     "variant_wrapper: unrecognized parameter",
@@ -265,5 +370,29 @@ impl TryFrom<Args> for Params {
             }
         }
         Ok(params)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::doit;
+    use quote::quote;
+
+    #[test]
+    fn curly() {
+        let s = doit(
+            quote!(),
+            syn::parse2(quote! {
+                #[derive(Debug)]
+                enum MyEnum {
+                    #[something]
+                    C {},
+                }
+            })
+            .unwrap(),
+        );
+        assert!(s.is_ok());
+        println!("{}", s.unwrap().to_string());
+        assert!(false);
     }
 }

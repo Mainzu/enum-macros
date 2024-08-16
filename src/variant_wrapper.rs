@@ -38,13 +38,15 @@ pub fn doit(args: TokenStream, item_enum: ItemEnum) -> Result<TokenStream> {
     let wrapped_variants: Vec<WrappedVariant> =
         item_enum.variants.iter().map(wrap_variant).try_collect()?;
 
-    let conversion_impls = wrapped_variants.iter().map(|WrappedVariant { id, ty }| {
-        if implement_conversion {
-            generate_conversion_impl(ident, id, ty)
-        } else {
-            quote!()
-        }
-    });
+    let conversion_impls = wrapped_variants
+        .iter()
+        .map(|WrappedVariant { attrs: _, id, ty }| {
+            if implement_conversion {
+                generate_conversion_impl(ident, id, ty)
+            } else {
+                quote!()
+            }
+        });
 
     Ok(quote! {
         #(#attrs)*
@@ -56,6 +58,7 @@ pub fn doit(args: TokenStream, item_enum: ItemEnum) -> Result<TokenStream> {
 }
 
 fn wrap_variant(variant: &Variant) -> Result<WrappedVariant> {
+    let attrs = variant.attrs.clone();
     let id = variant.ident.clone();
     let ty = match &variant.fields {
         Fields::Named(named_fields) => Err(Error::new(
@@ -79,7 +82,7 @@ fn wrap_variant(variant: &Variant) -> Result<WrappedVariant> {
             path: Path::from(id.clone()),
         }),
     };
-    Ok(WrappedVariant { id, ty })
+    Ok(WrappedVariant { attrs, id, ty })
 }
 
 enum Param {

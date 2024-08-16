@@ -62,3 +62,9 @@ pub fn variant_wrapper(args: TokenStream, input: TokenStream) -> TokenStream {
         parse_macro_input!(input),
     ))
 }
+
+/// Does nothing by itself
+#[proc_macro_derive(EnableExtraParameters, attributes(attribute))]
+pub fn enable_extra_parameters(_input: TokenStream) -> TokenStream {
+    TokenStream::default()
+}

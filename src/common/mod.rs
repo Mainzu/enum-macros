@@ -190,12 +190,14 @@ impl Parse for AttributeArgValue {
 }
 
 pub struct WrappedVariant {
+    pub attrs: Vec<Attribute>,
     pub id: Ident,
     pub ty: Type,
 }
 
 impl ToTokens for WrappedVariant {
     fn to_tokens(&self, tokens: &mut TokenStream) {
+        tokens.append_all(&self.attrs);
         self.id.to_tokens(tokens);
         tokens.append(Group::new(
             Delimiter::Parenthesis,
